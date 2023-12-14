@@ -1,0 +1,1414 @@
+\documentclass{article}%%
+\usepackage{makecell}
+\usepackage{amsmath}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{multirow}
+\usepackage[table]{xcolor}
+\usepackage[]{graphicx}
+\usepackage[]{color}
+\usepackage{wrapfig}
+\usepackage{float}
+\usepackage{colortbl}
+\usepackage{pdflscape}
+\usepackage{tabu}
+\usepackage{threeparttable}
+\newcommand{\logit}{\mathrm{logit}}
+\renewcommand{\$}{$} %$ 
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\DeclareUnicodeCharacter{B1}{$\pm$}
+\DeclareUnicodeCharacter{2192}{$\rightarrow$}
+\usepackage{hyperref}
+\topmargin -1.5cm        % read Lamport p.163
+\oddsidemargin -0.6cm    % read Lamport p.163
+\evensidemargin -0.6cm   % same as oddsidemargin but for left-hand pages
+\textwidth 17.4cm
+\textheight 23.94cm 
+\setlength{\parindent}{0.5cm}
+\title{Data analysis supplement to ``Challenges associated with the validation 
+  of protein force-fields based on structural criteria.''}
+\author{M.~Stroet, M.~Setz, T.~Lee, A.~Malde, G.~van~den~Bergen, 
+  \\P.~Sykacek\footnote{The responsibility for the analyses reported 
+    in this supplement lies with P.~Sykacek email: peter.sykacek@boku.ac.at}, 
+  C.~Oostenbrink and Alan E. Mark}
+\begin{document}
+\maketitle
+\section{Introduction} 
+<<setup, eval=TRUE, echo=FALSE>>=
+## initial setup
+library(knitr)
+knitr::opts_chunk$set(fig.asp=4/3, fig.width=9)
+options(warn=-1)
+##
+
+@ 
+
+All calculations in this document are based on the statistics package
+\Sexpr{R.Version()$version.string}. %$
+For improved reproducibility we provide the document source
+``ff\_validation\_nlme.Rnw'' as supplement. When placed together with
+the files ``Simulation\_data.csv'', ``Reference\_data.csv'' and
+``pdb\_id\_lengths.csv'' in the same directory, the document source
+can be processed by R and the package knitr \cite{Xie:2014, Xie:2015},
+as long as all additional dependencies (availability of the R packages
+``kableExtra'', ``lme4'', ``emmeans'', ``car'', ``lattice'', ``nlme''
+and ``dplyr'') are met. To reproduce the pdf version of this
+supplement, interested readers have to use the following commands:
+<<compile-demo, eval=FALSE, echo=TRUE>>=
+## in R:
+library(knitr)
+knit("ff_validation.Rnw")
+## on the command line:
+## > pdflatex ff_validation.tex
+
+@ 
+
+It should be kept in mind that optimization control in the scripts
+below were set to assure that a suitably small error tolerance is
+reached. In case you wish to replicate the analysis, you have to
+consider that as a result of these settings {\em the knitr phase in R
+  takes a considerable amount of time}.
+\section{Characterization of simulated proteins}
+A detailed discussion of all metrics that were calculated from
+simulation outcome is provided in the main paper. From a data analysis
+perspective it is however important to describe the nature of the
+metrics as this is important for further statistical consideration.
+
+\begin{center}
+\begin{tabular}{l l l}
+  Variable name & Term in paper& Type of metric\\
+  B\_Strand: &$\beta$-strand& count metric\\
+  A\_Helix: &$\alpha$-helix& count metric\\
+  B\_Bridge:& bridges between two $\beta$-strands in a $\beta$-sheet& count metric \\
+  ThreeTen\_Helix: & $3_{10}$-helix & count metric \\
+  Pi\_Helix: & $\pi$-helix & count metric \\
+  Hbond\_bb\_0.25\_120: &Hydrogen bonds& count metric\\
+  SASA\_polar: & solvent accessible surface area for polar residues & positive quantity\\ 
+  SASA\_nonpolar: &solvent accessible surface area for non polar residues & positive quantity\\ 
+  Rgyr: &Radius of gyration & positive quantity\\
+  RMSD.ADJ: &Length adjusted positional RMSD & positive quantity\\ 
+  phi\_rmsd: &Angular RMSD & positive quantity\\ 
+  psi\_rmsd: &Angular RMSD & positive quantity\\
+  NOE\_repl\_merged: & NOE intensities & positive quantity\\
+  Jvalue: &J-coupling constants& positive quantity
+\end{tabular}
+\end{center}
+
+\section{Data preprocessing}
+Our approach for assessing protein characteristics follows
+\cite{Villa+etal:2007}, who proposed analyzing the effects of force
+fields on molecular-simulation derived protein characteristics with a
+MANOVA. MANOVA type analyses have the advantage of increased power of
+detecting significance in case of {\em correlated} multivariate
+responses. MANOVA or multivariate linear models assume that the
+residuals are multivariate Gaussian distributions. 
+
+The metrics which characterize proteins are however either counts or
+positive quantities. Analysis of such data will likely result in
+residuals which deviate from Gaussian distributions, thus violating
+assumptions which are inherent to MANOVA and linear models. To improve
+compliance with Gaussian distributed residuals, we apply Box-Cox power
+transformations \cite{Box+Cox:1964} on all individual metrics before
+subjecting the data to a multivariate multilevel analysis. We used to
+this end the functions provided in the R package car
+\cite{Fox+Weisberg:2019}. To fulfill the constraint of the Box-Cox
+power transformation in the car package that values must be larger
+zero we set all zero or negative values before transformation to a
+value which equals $10\%$ of the smallest non zero value. This
+preprocessing was motivated to allow for a multivariate analysis of
+all protein characteristics in combination.
+  
+An additional complication arises in this particular situation with
+RMSD values which are known to depend on protein size. In combination
+with the unbalanced nature of the simulation experiment a protein
+length could confound the algorithm effect which we wish to assess. To
+avoid any chances of being mislead, we apply therefore the
+normalization procedure of RMSD values that was proposed in
+\cite{Carugo+Pongor:2001}, before subjecting the adjusted RMSD values
+to a Box-Cox transformation as well. 
+
+A significance analysis for pair wise differences of metric values
+between force fields is supplemented by analyses which assess
+differences between simulation derived and measured protein
+characteristics. With measured protein characteristics we refer to
+characteristics whcih are derived from experimentally determined
+crystal structure. The latter result allows for judgements of the
+influence of force fileds on the agreement between simulation and
+measurement.
+\section{MANOVA and multivariate multilevel analysis}
+The analysis in this work is inspired by \cite{Villa+etal:2007}, who
+proposed an analysis of the effects of force fields on
+molecular-simulation derived protein characteristics. Their original
+approach is based on MANOVA type analyses which have the advantage of
+increased power of detecting significance in case of {\em correlated}
+multivariate responses. Albeit straightforward to apply, a
+conventional MANOVA has in our situation several shortcomings.
+\begin{enumerate}
+\item MANOVA is only applicable to complete multivariate vectors of
+  protein characteristics. Including missing information requires in
+  such analyses additional steps like multiple imputations.
+\item Using linear model terminology, our assessment of force fields
+  require to consider three effects: a) the force field, b) the
+  simulated protein and c) technical replication of simulation
+  runs. Technical drop outs (e.g. problems of the compute
+  infrastructure) or a deliberate reduction of the number of lengthy
+  simulations runs will in general cause unbalanced designs. This
+  renders fixed effects analyses as in \cite{Villa+etal:2007} poorly
+  specified, as unbalanced multi-effects models will in general lead
+  to a dependency of p-values on the chosen type of sums of squares
+  calculation (type I, II and III ANOVA).
+\item An even more profound implication on our assessments of force
+  fields results from the fact that the replication of simulation runs
+  and the variation of simulated proteins must be considered as
+  independent random effects. Fixed effects analyses have in such
+  situations a general tendency to overestimate significance. Such
+  situations should thus preferably be assessed with mixed effects
+  models \cite{Pinheiro+Bates:2000}.
+\end{enumerate}
+For considering the multivariate multilevel aspect of the data, we
+suggest following \cite{Snijders+Bosker:2012} pages 282 ff. To
+implement their proposition in our setting, we rely on the R-nlme
+package \cite{Pinheiro+Bates:2000}. In the context of multivariate
+multilevel analysis, we can use a likelihood ratio test
+\cite{Mood+etal:1984} to assess all metrics in combination for
+significant dependencies on different force fields. Using the notion
+in \cite{Snijders+Bosker:2012}, chapter 16, we have to compare an
+``empty'' model which expresses the derived values of all metrics by a
+metric effect and attributes all further variation to the random
+effects ``protein'' and ``simulation run''. The more complex
+alternative hypothesis considers ``force field'' and interactions
+between ``force field'' and ``metric'' as additional fixed effects. A
+subsequent assessment of the likelihood ratio of these two models
+provides the required p-value for assessing the molecular simulation
+derived protein characteristics for significant dependencies on
+``force field''.
+\subsection{Multivariate multilevel analysis}
+After data preprocessing the proposed assessment of whether predicted
+protein characteristics depend significantly on ``force field'' may be
+obtained by a step by step translation of the R and nlme based
+implementation of the example in \cite{Snijders+Bosker:2012} chapter
+16. The authors provide a respective sample script at
+\url{http://www.stats.ox.ac.uk/~snijders/ch16.r} for download.
+\subsubsection{Rearranging the multivariate input data}
+\begin{enumerate}
+\item The first step in applying a multivariate multilevel analysis
+  requires us to rearrange the multivariate data to obtain a univariate
+  response variable ``all.y'' which holds the preprocessed metric
+  values. To allow the identification of the metric which corresponds
+  to the value we need to add a factor variable ``quant.fact'' which
+  denotes the corresponding type of metric. To complete the
+  description of the data, additional factors are required to identify
+  the applied force field (``all.alg''), the simulated protein
+  (``all.comp'') and the simulation run (``all.rep''). All variables
+  are constructed from the preprocessed protein characteristics and
+  bound to an R data frame.
+\item Missing protein characterizations which appear as missing values
+  in the multivariate input vectors are subsequently removed by
+  reducing the data to all complete cases.
+\item To allow calculating the correlation structure by the nlme
+  package, the final step in rearranging the data is to reorder the
+  data by metric type ``quant.fact'', protein id ``all.comp'' and
+  simulation run ``all.rep''.
+\end{enumerate}
+\subsubsection{The ``empty'' multivariate multilevel model}
+Using the mixed effects linear model lme from the R nlme package for a
+multivariate multilevel analysis requires us to specify four parts.
+\begin{enumerate}
+\item Function lme requires to specify the fixed effects term of the
+  model equation separately. For the ``empty'' model we assume that
+  metric values are independent of the force field. Hence only
+  depending on ``quant.fact'' the fixed effects model equation is:
+<<c1-chunk, eval=FALSE, echo=TRUE>>= 
+all.y~-1+quant.fact 
+@
+
+\item The second specification concerns the random effects
+  contribution. Irrespective of how we structure the fixed effects
+  formula, we have to identify the metric value as conditional on
+  the random effect ``protein''. The second random effect ``simulation
+  run'' which is nested within ``protein'' determines the residual
+  variance of the model and requires no separate specification. The
+  required random effect model formula is thus:
+<<c2-chunk, eval=FALSE, echo=TRUE>>= 
+~ -1+quant.fact|all.comp
+@ 
+
+\item An important characteristic of MANOVA analyses is their ability
+  to model multivariate residuals. In order to unlock this ability for
+  the essentially univariate lme model, we need to use its ``weights''
+  parameter. By an appropriate parametrization we allow for heteroscedasticity
+  thus obtaining relations similar to MANOVA analyses where
+  each sequence characteristic gets its own variance component. In the
+  context of lme, we achieve this by using the ``VarIdent'' variance
+  function (see \cite{Pinheiro+Bates:2000}, page 209) which allows for
+  residual variances to differ across levels of a stratification
+  variable. In our case we have to use ``quant.fact'' as
+  stratification variable and parameterize the weights parameter of lme
+  as:
+<<c3-chunk, eval=FALSE, echo=TRUE>>= 
+weights=varIdent(form=~1|quant.fact)
+@ 
+
+\item To arrive at a noise model which mimics the multivariate
+  residuals of a MANOVA we have finally also got to consider the
+  correlation structure between different ``quant.fact'' levels. This
+  is achieved by using the ``corr'' parameter of lme and a
+  parametrization by one of the ``corStruct'' classes in nlme. In
+  order to obtain a MANOVA compatible correlation structure, we use
+  the generic corSym class (see \cite{Pinheiro+Bates:2000}, page 234)
+  and parameterize it by a formula which regards the numeric
+  representation of the factor variable ``quant.fact'' as conditional
+  on the random effects ``simulation run'' which is nested within
+  ``protein''. The respective corr parametrization is thus:
+<<c4-chunk, eval=FALSE, echo=TRUE>>= 
+corr=corSymm(form=~as.numeric(quant.fact)|all.comp/all.rep)
+@    
+\end{enumerate}
+\subsubsection{Adding force field as regressor}
+Our assessment of whether different force fields lead to statistically
+significant variations of sequence characteristics rely on a
+likelihood ratio test. This is achieved by comparing the ``empty''
+model with a more complex multivariate multilevel model, which uses
+the factor ``all.alg'' representing different force fields as
+additional regressor. The only difference between the ``empty'' model
+and this alternative explanation of sequence characteristics is a
+different fixed effects formula which in our case is:
+<<c5-chunk, eval=FALSE, echo=TRUE>>= 
+all.y~quant.fact*all.alg
+@ 
+\subsubsection{Likelihood ratio test}
+The likelihood ratio test (see \cite{Pinheiro+Bates:2000}, page 83)
+which allows us to infer whether the sequence characteristics we
+predict from simulation runs depend significantly on chosen force
+fields requires two model fits which are passed as parameters to
+function anova. The latter function calculates the p-value of the
+likelihood ratio test and provides a textual summary of the model
+comparison. Note that for reasons of clarity, details like the
+necessary adjustments of optimization control have been left out in
+this code chunk.
+<<c6-chunk, eval=FALSE, echo=TRUE>>= 
+## fit of the empty model
+lme.fit.n <- lme(all.y~-1+quant.fact, random = rnd.frm, 
+                 weights=varIdent(form=~1|quant.fact), 
+                 corr=corSymm(form=~as.numeric(quant.fact)|all.comp/all.rep),
+                 data=univ.analyse.data,
+                 control=alg.ctrl, method='ML')
+## fit of the alternative model
+lme.fit.a <- lme(all.y~quant.fact*all.alg, random = rnd.frm,
+                 weights=varIdent(form=~1|quant.fact), 
+                 corr=corSymm(form=~as.numeric(quant.fact)|all.comp/all.rep),
+                 data=univ.analyse.data,
+                 control=alg.ctrl, method='ML')
+
+## likelihood ratio test and summary of fit
+anova(lme.fit.n, lme.fit.a)
+@ 
+\subsection{Metric and force field specific analyses}
+Having shown by multivariate analysis that force fields lead to
+significant variation in the assessment metrics we will now prepare a
+more detailed assessment. To gain insight about interactions between
+force fields and assessment metrics we will now switch to analyses of
+univariate metrics which were previously transformed to approximate
+Gaussian residuals. As mentioned above the nesting of replicate
+simulation runs within compounds require this analysis to be carried
+out with linear mixed effects models. By keeping the metrics separate,
+adjustments for metric dependent residual variances and correlations
+between metrics are not required. To considerably simplify analysis we
+switch to a univariate mixed effects analysis with the lme4 package
+\cite{Bates+etal:2015} for modeling and the emsmeans package
+\cite{Lenth+etal:2019} for assessing the binary comparisons between
+force fields. The planned univariate assessments consist of several
+significance tests. The p-values are thus adjusted for multiple
+testing using the R p.adjust function and the Benjamini \& Yekutieli
+FDR approach \cite{Benjamini+Yekutieli:2001}. The code fragments below
+illustrate analysis of RMSDs. The result tables are obtained by
+looping such code over all metrics (not shown but available in the 
+accompanying source file ff\_validation.Rnw).
+\subsubsection{Metric specific null model with lme4}
+The null model considers only the random effects all.comp (proteins)
+and replicate simulation run which determines the within compound
+residuals.
+<<c7-chunk, eval=FALSE, echo=TRUE>>= 
+## the lme4 package for linear mixed modeling
+library(lme4)
+library(emmeans)
+## we illustrate RMSD as an example
+rw.sel <- univ.analyse.data$quant.fact=="RMSD.ADJ"
+fit.n <- lmer(all.y~(1|all.comp), data=univ.analyse.data[rw.sel,])
+@ 
+
+\subsubsection{Metric specific alternative model and ANOVA}
+The alternative more complex model considers force field as fixed
+effect. Applying the anova function to both fits contrasts the
+goodness of fit with the increased complexity by a likelihood ratio
+test. To allow us to correct for multiple testing, we have to extract
+the p-value from the returned object.
+<<c8-chunk, eval=FALSE, echo=TRUE>>= 
+fit.a <- lmer(all.y~all.alg+(1|all.comp), data= univ.analyse.data[rw.sel,])
+res <- anova(fit.n, fit.a)
+p.value <-  res[["Pr(>Chisq)"]][2]
+@ 
+
+If we may assess the improvement by the alternative model as
+statistically significant, a more detailed inspection of force field
+induced differences with pairwise comparisons makes sense.
+\subsubsection{Pairwise contrasts with the emmeans package}
+The emmeans package is the preferred package for assessments whether
+contrasts deviate significantly from zero. Since we are interested in
+assessing all pairwise contrasts between algorithms for significance,
+we may use the standard emmeans workflow. To control the overall
+false positive rate for multiple testing, the p-values of all
+comparisons are finally adjusted using the Benjamini \& Yekutieli FDR
+approach as implemented in the standard R p.adjust function.
+<<c9-chunk, eval=FALSE, echo=TRUE>>= 
+## next step: analysis of pairwise comparisons we do not adjust 
+## as we do that for all pairwise comparisons together.
+res <- emmeans(fit.a, list(pairwise ~ all.alg), adjust = "none")
+## convert the emmeans result to a dataframe
+pdtab <- as.data.frame(res$"pairwise differences of all.alg")
+## extract comparisons between force fields as strings
+all.pairs <- levels(pdtab$contrast)[pdtab$contrast]
+## and the corresponding p-values
+all.pmp <- pdtab$p.value
+BY.adj <- p.adjust(all.pmp, method="BY")
+@ 
+
+\section{Results}
+<<initialisation-chunk, eval=TRUE, echo=FALSE>>=
+## code block for loading data, applying the length
+## adjustment and a Box Cox transformation.
+rmsd.lenadj <- function(rmsd.in, len.prot, L.targ=100){
+    ## adjusts RMSD values to attenuate the length effect
+    ## rmsd.lendj uses the transformation suggested by 
+    ## Carugo and Pongor 2001. 
+    ##
+    ## Important note: the vectors rmsd.in, len.prot and
+    ## rmsd.out are in the same order. At position n
+    ## we find in all three vectors the same protein.
+    ##
+    ## IN
+    ##
+    ## rmsd.in:   RMSD values, Note: proteins are in the same order 
+    ##            as in len.prot.
+    ## len.prot:  number of amino acid residues in proteins
+    ## L.targ:    Target residue number, defaults to 100.
+    ##
+    ## OUT
+    ## 
+    ## rmsd.out:  Transformed RMSD values, Note: proteins are in the same order 
+    ##            as in len.prot.
+    ##
+    ## (C) P. Sykacek 2017 <peter@sykacek.net>
+    
+    ## not fitted for residue length < 40
+    prot.len.smaller.40 <- len.prot < 40
+    ## print(len.prot[prot.len.smaller.40])
+
+    log.trglen <- log(L.targ)
+    rmsd.out <- rmsd.in / (1+0.5*(log(len.prot)-log.trglen))
+    rmsd.out[prot.len.smaller.40] <- rmsd.in[prot.len.smaller.40]
+    rmsd.out
+}
+
+
+
+## some definitions used below to distinguish the different types of value columns
+## original column names in inpout data (for display)
+## count values (need reference to crystal)
+count.cols <- c("ThreeTen_Helix", "A_Helix", "Pi_Helix", "Bend", "B_Bridge", "B_Strand", "Turn", 
+               "3-Helical Turn", "Alpha-Helix", "B_Strand", "Beta-Turn", "Irregular Beta Strand", 
+               "Left-handed Turn", "Other Tight Turn", "Unclassified", "3-10 helix", "Alpha-helix", 
+               "Beta-bulge", "Beta-cap", "Beta-strand", "Ext. beta-strand", "Gamma-turn", "Hairpin", 
+               "Helix-cap", "Left turn 2", "Left-handed helix", "Pi-helix", "Polyproline-helix", 
+               "Schellman turn", "Turn 1", "Turn 2", "Turn 8", "Turn-cap", "Hbond_native_bb", 
+               "Hbond_bb", "Hbond_native_bb_0.25_120", "Hbond_bb_0.25_120") 
+##
+## positive continuous values (need reference to crystal)
+numquantcols <- c("SASA_polar", "SASA_nonpolar", "Rgyr", "Energy", "Jvalue")
+##
+## difference metrics: (relative to structure need no reference) 
+scorecols <- c("RMSD.ADJ", "NOE_repl_merged", "phi_rmsd", "psi_rmsd")
+
+adjustcols <- c(count.cols, numquantcols)
+
+## disp.columns <- c("B_Strand", "A_Helix", "B_Bridge",  "ThreeTen_Helix", "Pi_Helix",
+##                 "Hbond_bb_0.25_120", "SASA_polar", "SASA_nonpolar", "Rgyr",  "RMSD","phi_rmsd", "psi_rmsd"
+##                 )
+## column names which go into analysis after transformation
+use.columns <- c(
+    "Hbond_bb_0.25_120", "Hbond_native_bb_0.25_120",
+    "SASA_polar", "SASA_nonpolar", "Rgyr", "A_Helix", 
+    "B_Strand", "ThreeTen_Helix", "Jvalue", 
+    "NOE_repl_merged", "RMSD.ADJ",
+     "B_Bridge",   "Pi_Helix"
+)
+## columns with count values
+#count.cols <- c("B_Strand", "A_Helix", "B_Bridge", "ThreeTen_Helix", "Pi_Helix", "Hbond_bb_0.25_120")
+## columns containing data which are closest to Gaussian residual assumptions.
+##lin.gauss.cols <- c("SASA_polar", "SASA_nonpolar", "Rgyr")
+## get the data
+##in.data <- read.csv("ALL_processed_data_native_counts.csv", sep=",", dec=".", header=T)
+suppressMessages(in.data <- read.csv("Simulation_data.csv", sep=",", dec=".", header=T))
+## the crystalographic measurements are not required for this analysis.
+##in.data.cr <- read.csv("ALL_processed_data_native_counts_crystal.csv", sep=",", dec=".", header=T)
+## trg.data <- read.csv("ALL_processed_data_native_counts_crystal.csv", sep=",", dec=".", header=T)
+suppressMessages(trg.data <- read.csv("Reference_data.csv", sep=",", dec=".", header=T))
+## RMSD and RMSD.ADJ are irnored for true data (unavailable)
+trg.data$RMSD.ADJ <- trg.data$RMSD
+
+## make sure to convert algorithms and compounds to factor variables!
+in.data$algorithm <- as.factor(in.data$algorithm)
+in.data$compound <- as.factor(in.data$compound)
+trg.data$algorithm <- as.factor(trg.data$algorithm)
+trg.data$compound <- as.factor(trg.data$compound)
+
+comp <- in.data$compound
+alg <- in.data$algorithm
+## adjustment of RMSD:
+suppressMessages(prot.char <- read.csv("pdb_id_lengths.csv", stringsAsFactors = FALSE))
+## allocate proteins in ALL_processed_data_native_counts.csv with missing 
+## length information in pdb_id_lengths.csv
+all.miss <- c()
+for (prot in unique(comp)){
+    if (!(prot %in% prot.char$PDB.ID)){
+        all.miss <- c(all.miss, prot)
+    }
+}
+## remove proteins from alg.characteristics which have missing
+## length information
+for (prot in all.miss){
+    in.data <- in.data[!in.data$compound==prot,]
+    trg.data <- trg.data[!in.data$compound==prot,]
+}
+
+## augment alg.characteristics by number of amino acid residues of simulation proteins
+prot.len <- rep(0, nrow(in.data))
+for (n in seq(1, nrow(in.data))){
+    prot.len[n] <- prot.char$SEQ.LENGTH[prot.char$PDB.ID==in.data$compound[n]]
+}
+in.data$prot.len <- prot.len
+## we do now adjust the RMSD values to a default target length of 100 residues.
+in.data$RMSD.ADJ <- rmsd.lenadj(in.data$RMSD, in.data$prot.len)
+## extract all simulation data
+coln <- colnames(in.data)
+X.colnames <- coln[coln %in% use.columns]
+X <- as.matrix(in.data[,X.colnames])
+## and the targets. note that the missing RMSD is no problem as we will not adjust for it.
+coln <- colnames(trg.data)
+T.colnames <- coln[coln %in% use.columns]
+T <- as.matrix(trg.data[, T.colnames])
+
+## modify secondary-structure characteristics, to avoid 0 in box-cox transform:
+delta <- 0.1
+for(col in  colnames(X)){
+    dt <- c(X[,col], T[,col])
+    alph <- min(dt[dt>0], na.rm=T)*delta
+    ## maintain positivity but keep NAs
+    tmp <- X[,col]
+    nadx <- is.na(tmp)
+    tmp[tmp<=0] <- alph
+    X[,col] <- tmp
+    X[nadx,col] <- NA
+    ## maintain positivity but keep NAs
+    tmp <- T[,col]
+    nadx <- is.na(tmp)
+    tmp[tmp<=0] <- alph
+    T[,col] <- tmp    
+    T[nadx,col] <- NA
+}
+
+## multiply phi_rmsd and psi_rmsd with 10^3 to get values in the range between 1 and 10:
+X.colnames <- colnames(X)
+
+#for(col in c("phi_rmsd", "psi_rmsd")){
+#  if(! col %in% X.colnames)
+#    next
+#  X[,col] <-X[,col]*10^3
+#}
+
+## generate a dataframe from the preprocessed metric values
+X.data <- as.data.frame(X)
+X.data$compound <- in.data$compound
+X.data$algorithm <- in.data$algorithm
+## and targets
+T.data <- as.data.frame(T)
+T.data$compound <- trg.data$compound
+T.data$algorithm <- trg.data$algorithm
+
+## checking for nans:
+##nans <- is.na(X.data$ThreeTen_Helix) 
+##for(col in use.columns){
+##  nans <- nans | is.na(X.data[col])
+##}
+
+suppressMessages(library(car))
+##summary(
+##mixed.box.cox <- powerTransform(X~compound*algorithm, X.data)
+##)
+## coef(mixed.box.cox, round=F)
+
+## conversion of the data to an nlme multivariate multilevel model compatible dataframe:
+## we use the dimnames we generated before as a new factor variable.
+## and generate a different dataframe for analysis with univariate models.
+## quantification factor (takes care of the multi dimensions in Y)
+## Note that the quantification is added as numerical factor (1,2,,,)
+## This allows to consider correlations among samples.
+
+## first get the replicate counter in place:
+comp <- in.data$compound
+unqcomp <- unique(comp)
+
+## limit analysis to three components (just a debugging step to reduce time)
+##unqcomp <- unqcomp[1:3]
+algs <- in.data$algorithm
+unqalg <- unique(algs)
+# all.rep is a random effect which represents repeated molecular 
+# simulation runs. These runs are unpaired and require thus for
+# every row in the loaded dataframe a separate value.
+all.rep <- c()
+# limit quantification
+#X.colnames <- X.colnames[1:2]
+rep.cands <- c(1: nrow(X.data))
+
+quant.fact <- c()
+# store for all y values
+all.y <- c()
+all.raw <- c()
+# stire for all algorithms
+all.alg <- c()
+
+# store for all compounds
+all.comp <- c()
+
+## strore for transformed crystal based target which we take from 
+all.t <- c()
+
+for(quant.nam in X.colnames){
+    ## apply box cox transformation on the residuals which result from
+    ## a fixed effects model of compound*algorithm (compound refers to 
+    ## the proteins and algorithm to the force fields).
+    ## this column wise operation removes NAs only per column
+    ## The modification was required to allow including NOE and Jvalue
+    #cat(quant.nam)
+    if (quant.nam %in% adjustcols){
+        ## we have a column which requires adjustments by crystal values
+        #cat("truth required\n")
+        nonas <- !(is.na(X.data[, quant.nam]) | is.na(T.data[, quant.nam]))
+    } else {
+        ## we do not need the crystal target value and only ignore NA simulation results.
+        #cat("score\n")
+        nonas <- !is.na(X.data[, quant.nam])
+    }
+    #cat(length(nonas), "\n")
+    #cat(sum(nonas), "\n")
+    ## extract tmpX and tmpT
+    tmpX <- X.data[nonas, c(quant.nam, "compound", "algorithm")]
+    tmpT <- T.data[nonas, c(quant.nam, "compound", "algorithm")]
+    #cat(dim(tmpX), "\n")
+    #cat(dim(tmpT), "\n")
+    ## augment all.alg all.comp and all.rep (no pairing)
+    ## we need strings here otherwise we lose the names!!
+    all.alg <- c(all.alg, levels(tmpX[,"algorithm"])[tmpX[,"algorithm"]])
+    all.comp <- c(all.comp, levels(tmpX[,"compound"])[tmpX[,"compound"]])
+    all.rep <- c(all.rep, rep.cands[nonas])
+    ## cat(dim(tmpX), "\n")
+    ## cat(quant.nam, "\n")
+    if (quant.nam %in% c("NOE_repl_merged", "Jvalue")) {
+        reg.frml <- as.formula(paste(quant.nam, "~compound"))
+    }else{
+        reg.frml=as.formula(paste(quant.nam, "~compound*algorithm"))
+    }
+    ## mod 02.01.2020 -> collect raw data as well
+    all.raw <- c(all.raw, tmpX[,quant.nam])
+    ## all.rawt <- c(all.rawt, tmpT[, quant.nam]) ## -> irrelevant
+    bcp <- powerTransform(reg.frml, tmpX)
+    ## applying the box-cox transform per property: and storing the transformed into all.y
+    all.y <- c(all.y, bcPower(tmpX[,quant.nam], bcp$lambda))
+    ## we also apply box-cox to the crystal data using the same transform we also
+    ## used on the simulation derived quantities.
+    all.t <- c(all.t, bcPower(tmpT[,quant.nam], bcp$lambda))
+    quant.fact <- c(quant.fact, rep(quant.nam, nrow(tmpX)))
+    ## cat(dim(tmpX), "\n")
+    ## cat("----\n")
+}
+## we take now the difference y-t
+all.dyt <- c()
+for (rwid in c(1:length(all.y))){
+    if (quant.fact[rwid] %in% adjustcols){
+        ## we either take differences
+        all.dyt <- c(all.dyt, all.y[rwid]-all.t[rwid])
+    } else {
+        ## or the y value (in case we have a quantity which is already a measure of deviation).
+        all.dyt <- c(all.dyt, all.y[rwid])
+    }
+}
+## move all strings to factors
+quant.fact <- as.factor(quant.fact)
+all.alg <- as.factor(all.alg)
+all.comp <- as.factor(all.comp)
+all.rep <- as.factor(all.rep)
+
+## sum(is.na(all.y))
+
+## generate a new analysis data frame
+## 02.01.2020 add raw data 15.01 - add transformed differences to obtain a ranking which assesses 
+## differences to assumed ground truth.
+univ.analyse.data <- data.frame(quant.fact, all.alg, all.comp, all.rep, all.y, all.raw, all.dyt)
+## sum(is.na(univ.analyse.data$all.y))
+## length(univ.analyse.data$all.y)
+## we can now get very easily rid of the simulations which are missing (the NAs we set initially)
+univ.analyse.data <- univ.analyse.data[complete.cases(univ.analyse.data),]
+## sum(is.na(univ.analyse.data$all.y))
+## length(univ.analyse.data$all.y)
+
+## summary(univ.analyse.data)
+## sort comp first, then algorithm:
+## univ.analyse.data <- univ.analyse.data[order(univ.analyse.data$all.comp, univ.analyse.data$all.alg),]
+## sort by nesting level of variance components
+univ.analyse.data <- univ.analyse.data[order(univ.analyse.data$quant.fact, univ.analyse.data$all.comp, 
+                                             univ.analyse.data$all.rep),]
+
+## test!!
+## univ.analyse.data$all.dyt <- univ.analyse.data$all.y
+
+##
+##
+##
+@ 
+
+\subsection{Summary statistics of raw data}
+%\begin{center}
+<<smry-chunk, eval=TRUE, echo=FALSE>>=
+summary(in.data[,use.columns])
+@ 
+%\end{center}
+\subsection{Box Cox transformed data}
+The panel of box plots below provides a visualization of the
+preprocessed sequence characteristics.  Every panel shows five boxes
+which illustrate the distribution of a particular sequence
+characteristic for the force fields ``45A4'', ``53A6'', ``54A7'', and
+``54A8''.
+
+<<bp-chunk, eval=TRUE, echo=FALSE>>=
+library(lattice)
+## generate for every sequence characteristic a box plot in dependency of force field.
+bwplot(all.y~all.alg|quant.fact, data=univ.analyse.data, main="Preprocessed sequence characteristics", 
+       scales = list(y = "free"), layout=c(2, 7))
+
+@ 
+
+\subsection{MANOVA and multivariate multilevel analysis}
+<<manova-chunk, eval=TRUE, echo=FALSE>>=
+## This is the multivariate multilevel analysis !!
+##
+## an nlme compatible likelihood ratio test.
+lrt <- function (obj1, obj2) {
+    ## lrt calculates a likelihood ratio test for R objects which
+    ## provide log likelihoods and degrees of freedom via function
+    ## logLik.  The order in which the two model objects are provided
+    ## does not matter: a negative difference in degrees of freedom is
+    ## taken into account by exchanging signs of df differences and
+    ## log likelihood differences. The requirements of function lrt
+    ## are compatible with most R modelling packages.
+    ## 
+    ## IN 
+    ##
+    ## obj1, obj2: two fit models which provide likelihoods via 
+    ##       logLik(obj1) and logLik(obj2) and carry their 
+    ##       degrees of freedom in the attribute "df".
+    ##
+    ## OUT
+    ##
+    ## res:        an R list object with named elements
+    ## $L01:       deviance statistic of likelihood ratio test
+    ## $df :       difference between obj1 and obj2 in degrees of freedom 
+    ## $"p-value": p-value of likelihood ratio test.
+    ##
+    ## (C) P. Sykacek 2016 <peter@sykacek.net>
+    
+    L0 <- logLik(obj1)
+    L1 <- logLik(obj2)
+    L01 <- as.vector(- 2 * (L0 - L1))
+    df <- attr(L1, "df") - attr(L0, "df")
+    if (df < 0){
+        L01 <- -L01
+        df <- -df
+    }
+    list(L01 = L01, df = df,
+         "p-value" = pchisq(L01, df, lower.tail = FALSE))
+} 
+
+library(nlme)
+## Important material at:
+## http://www.stats.ox.ac.uk/~snijders/ch16.r
+## also in Pinheiro & Bates 2000 "Mixed effects 
+## models in S and s-plus" and there in 
+## particular p. 226 & ff.
+## Note that the current function call from below 
+## is fine. We allow for heteroscedasticity and 
+## for correlation.
+##
+## control for the algorithm parameters
+alg.ctrl <- lmeControl()
+mul.fact <- 2
+##mul.fact <- 0 ## remove after testing
+alg.ctrl$maxIter <- alg.ctrl$maxIter*mul.fact
+alg.ctrl$msMaxIter <- alg.ctrl$msMaxIter*mul.fact
+alg.ctrl$niterEM <- alg.ctrl$niterEM*mul.fact
+##alg.ctrl$msMaxEval <- alg.ctrl$msMaxEval*mul.fact
+alg.ctrl$returnObject = TRUE
+do.dbg <- FALSE
+## temporary debug option for reducing data to speed things up
+if (do.dbg) {
+    rowsel <- univ.analyse.data$quant.fact %in% c("RMSD.ADJ", "Hbond_bb_0.25_120", "Hbond_native_bb_0.25_120",
+    "SASA_polar") 
+    univ.analyse.data <- univ.analyse.data[rowsel,]
+}
+
+## lme fits for multivariate responses.
+##
+## suppressWarnings avoids that we display the warning messages which
+## result from not reaching the error tolerance limit within the specified
+## number of iterations during model optimisation.
+
+rnd.frm <- ~ -1+quant.fact|all.comp
+## "empty" model fit
+suppressWarnings(lme.fit.n <- lme(all.y~-1+quant.fact, random = rnd.frm, 
+                                  weights=varIdent(form=~1|quant.fact), 
+                                  corr=corSymm(form=~as.numeric(quant.fact)|all.comp/all.rep),
+                                  data=univ.analyse.data,
+                                  control=alg.ctrl, method='ML'))
+
+##summary(lme.fit.n)
+
+## the alternative model uses in addition all.alg as fixed effect.
+suppressWarnings(lme.fit.a <- lme(all.y~quant.fact*all.alg, random = rnd.frm,
+                                  weights=varIdent(form=~1|quant.fact), 
+                                  corr=corSymm(form=~as.numeric(quant.fact)|all.comp/all.rep),
+                                  data=univ.analyse.data,
+                                  control=alg.ctrl, method='ML'))
+
+## calculate the likelihood ratio p-value and format it as a string.
+## lrt.pval is used in the following LaTex text to display the
+## actual non truncated p-value which is approximated in the anova table output.
+lrt.pval <- sprintf("%1.3e", lrt(lme.fit.n, lme.fit.a)[["p-value"]])
+## summary(lme.fit.a)
+anova(lme.fit.n, lme.fit.a)
+##
+##
+##
+@ 
+
+The ANOVA output compares the empty model against the more complex
+model which uses ``all.alg'' (representing force field) as
+regressor. A strongly increased likelihood and far superior AIC and
+BIC of the more complex model provide evidence that ``force field''
+has a considerable effect on predicted sequence characteristics.
+Leading for the likelihood ratio test to a p-value of $<0.0001$, the
+differences are of very high statistical significance. The p-value
+reported by the anova function follows common practice in statistics,
+where small p-values are usually only reported as ``smaller than a
+threshold''. The actual p-value from the likelihood ratio test is
+$\mathrm{p-val}=\Sexpr{lrt.pval}$.
+\section{Property and algorithm specific mixed model analysis}
+After having concluded by a mixed effects regression analysis that the
+multivariate metric vector depends significantly on force field, we
+will now perform a more detailed analysis. We will to this end rely on
+two analyses which assess within metric. 
+\begin{enumerate}
+\item by a likelihood ratio test whether adding force field as
+  regressor leads to significant improvements over the empty (null)
+  model.
+\item by formulating all ten pairwise contrasts, subsequent
+  significance analysis and multiple testing correction whether
+  differences between two force fields are statistically significant.
+\end{enumerate}
+The first stage of this fine grained analysis provides us thus with
+twelve p-values which result from the per metric likelihood ratio
+tests 1). The second stage of this analysis in 2) provides us across
+all metrics and pairwise contrasts with $80$ p-values which assess
+whether the respective pair of force fields leads for a particular
+metric to significantly different expectations. To control the overall
+false positive rate, we adjust the p-values with the Benjamini \&
+Yekutieli FDR (BY) for multiple testing.
+
+<<bincomp-chunk, eval=TRUE, echo=FALSE>>=
+    
+suppressMessages(library(lme4))
+suppressMessages(library(emmeans))
+##options(kableExtra.latex.load_packages = FALSE)
+suppressMessages(library(kableExtra)) # for table output
+suppressMessages(library(dplyr))
+all.p <- c()
+all.qf <- c()
+## store for pairwise comparisons
+all.pairs <- c()  
+## metrics
+all.metrics <- c()
+## p-values for paiwise comparisons within metrics
+all.pmp <- c()
+## the expected mean differences of the pairwise comparisons
+all.emd <- c()
+## and teh associated standard error
+all.se <- c()
+## 02.01 -> add a pairwise test for predicting all.raw to see whether the table 
+## from A. Mark et al. is fine.
+## pairwise comparison
+all.rw.pairs <- c()
+## expected contrast value
+all.rw.emd <- c()
+## standard error of contrast
+all.rw.se <- c()
+## stores for testing the delta values
+# p-values
+all.dyt.pmp <- c() 
+## pairwise comparison
+all.dyt.pairs <- c()
+## expected contrast value
+all.dyt.emd <- c()
+## standard error of contrast
+all.dyt.se <- c()
+## the for loop selects individual metrics from the univariate
+## dataframe.
+for (q.f in unique(univ.analyse.data$quant.fact)){
+    rw.sel <- univ.analyse.data$quant.fact==q.f
+    fit.n <- lmer(all.y~(1|all.comp), data=univ.analyse.data[rw.sel,])
+    ## summary(fit.n)
+    ## the alternative model uses in addition all.alg (force field) as fixed effect.
+    fit.a <- lmer(all.y~all.alg+(1|all.comp), data= univ.analyse.data[rw.sel,])
+    ## summary(fit.a)
+    ## we can finally use anova to analyse for significant differences.
+    ## aka a significant dependency of metrics from force field.
+    suppressMessages(res <- anova(fit.n, fit.a))
+    all.p <- c(all.p, res[["Pr(>Chisq)"]][2])
+    all.qf <- c(all.qf, q.f)
+    ## next step: analysis of pairwise comparisons we do not adjust 
+    ## as we do that for all pairwise comparisons together.
+    suppressMessages(res <- emmeans(fit.a, list(pairwise ~ all.alg), adjust = "none"))
+    ## convert the emmeans result to a dataframe
+    pdtab <- as.data.frame(res$"pairwise differences of all.alg", stringsAsFactors=FALSE)
+    ## store all results 
+    c.transdata.levles <-  pdtab[,1]
+    all.pairs <- c(all.pairs, pdtab[,1])
+    all.metrics <- c(all.metrics, rep(q.f, nrow(pdtab)))
+    all.pmp <- c(all.pmp, pdtab$p.value)
+    all.emd <- c(all.emd, pdtab$estimate)
+    all.se <- c(all.se, pdtab$SE)
+    ## 02.01.2020 -> add the analysis on raw data and collect results.
+    fit.raw.a <- lmer(all.raw~all.alg+(1|all.comp), data= univ.analyse.data[rw.sel,])
+    ## next step: analysis of pairwise comparisons we do not adjust 
+    ## as we do that for all pairwise comparisons together.
+    suppressMessages(raw.res <- emmeans(fit.raw.a, list(pairwise ~ all.alg), adjust = "none"))
+    pdrawtab <- as.data.frame(raw.res$"pairwise differences of all.alg", stringsAsFactors=FALSE)
+    c.origdata.levels <- pdrawtab[,1]
+    ## reorder the pairwise contrasts in c.origdata.levels to match the order in c.transdata.levles
+    ## we do this to make sure that the statistics calculated on raw data match with p-values and
+    ## statistics calculated on Box Cox transformed data.
+    resbc <- sort(c.transdata.levles, index.return=TRUE)
+    resraw <- sort(c.origdata.levels, index.return=TRUE)
+    ## rw2bc allows reordering rows of pdrawtab to match the order in pdtab
+    rw2bcdx <-resraw$ix[resbc$ix]
+    pdrawtab <- pdrawtab[rw2bcdx,]
+    all.rw.pairs <- c(all.rw.pairs, pdrawtab[.1])
+    all.rw.emd <- c(all.rw.emd, pdrawtab$estimate)
+    all.rw.se <- c(all.rw.se, pdrawtab$SE)   
+    ## the final analysis is a paired assessment of force fields on differences 
+    ## between simulation and crystall inferred truth
+    fit.dyt.a <- lmer(all.dyt~all.alg+(1|all.comp), data= univ.analyse.data[rw.sel,])
+    ## next step: analysis of pairwise comparisons we do not adjust 
+    ## as we do that for all pairwise comparisons together.
+    suppressMessages(dyt.res <- emmeans(fit.dyt.a, list(pairwise ~ all.alg), adjust = "none"))
+    pddyttab <- as.data.frame(dyt.res$"pairwise differences of all.alg", stringsAsFactors=FALSE)
+    c.dytdata.levels <- pddyttab[,1]
+    ## reorder the pairwise contrasts in c.origdata.levels to match the order in c.transdata.levles
+    ## we do this to make sure that the statistics calculated on raw data match with p-values and
+    ## statistics calculated on Box Cox transformed data.
+    resbc <- sort(c.transdata.levles, index.return=TRUE)
+    resdyt <- sort(c.dytdata.levels, index.return=TRUE)
+    ## rw2bc allows reordering rows of pddyttab to match the order in pdtab
+    rw2bcdx <-resdyt$ix[resbc$ix]
+    pddyttab <- pddyttab[rw2bcdx,]
+    all.dyt.pmp <- c(all.dyt.pmp, pddyttab$p.value)
+    all.dyt.pairs <- c(all.dyt.pairs, pddyttab[,1])
+    all.dyt.emd <- c(all.dyt.emd, pddyttab$estimate)
+    all.dyt.se <- c(all.dyt.se, pddyttab$SE)   
+}
+
+cat("nr pairs:", length(all.pairs))
+cat("Order in all.pairs and all.rw.pairs match in: ", 100.0*sum(all.rw.pairs==all.pairs)/length(all.pairs), " % cases.\n")
+cat("Order in all.pairs and all.dyt.pairs match in: ", 100.0*sum(all.dyt.pairs==all.pairs)/length(all.pairs), " % cases.\n")
+
+cat("Properties     :", all.qf, "\n")
+cat("Raw p-values   :", all.p, "\n")
+cat("BH adjusted    :", p.adjust(all.p, method="BH"), "\n")
+cat("BY adjusted    :", p.adjust(all.p, method="BY"), "\n")
+##cat("Bonferoni adj. :", p.adjust(all.p, method="BY"), "\n")
+
+## generate two dataframes
+## 1) for assessing the effect of force field on individual metrics:
+raw.pval <- all.p
+BY.adj <- p.adjust(all.p, method="BY")
+metric <- all.qf
+lrt.pvals <- data.frame(metric, raw.pval, BY.adj, stringsAsFactors=FALSE)
+## 2) for the pairwise assessments
+raw.pval <- all.pmp             ## pairwise differences on metric values
+BY.adj <- p.adjust(all.pmp, method="BY")
+dlt.pval <- all.dyt.pmp         ## pairwise differences on metric - truth values
+BY.dlt <- p.adjust(all.dyt.pmp, method="BY")
+mean.diff <- all.emd
+se.diff <- all.se
+md.raw <- all.rw.emd
+se.raw <- all.rw.se
+md.dlt <- all.dyt.emd
+se.dlt <- all.dyt.se
+metric <- all.metrics
+contrast <- all.pairs
+pair.tests <- data.frame(metric, contrast, mean.diff, se.diff, md.raw, se.raw, md.dlt, se.dlt, 
+                         raw.pval, BY.adj, dlt.pval, BY.dlt, stringsAsFactors=FALSE)
+
+pval2char <- function(pval){
+    if (pval> 0.1){
+        return("( )")
+    }
+    else if (pval < 0.001)
+    {
+        return("(***)")
+    }
+    else if (pval < 0.01)
+    {
+        return("(**)")
+    }
+    else if (pval < 0.05){
+        return("(*)")
+    }
+    else if (pval <0.1)
+    {
+        return("(.)")
+    }
+}
+
+p2str <- function(pvals){
+    ## provides an accurate string representation for p-values
+    sprintf("%8s %5s", sprintf("%1.2e", pvals), sapply(pvals, pval2char))
+}
+
+pairtest2restab <- function(df, tabcol="metric", rowcol="contrast", mncol="mean.diff", secol="se.diff",
+                            pvals="BY.adj", v.format=function(mv, sv) sprintf("%1.2f \U00B1 %1.2f", mv, sv), 
+                            p.format=function(pvals) sprintf("%1.2e", pvals),
+                            col.format=function(vstr, pstr) sprintf("%s [%s]", vstr, pstr)){
+    ## converts a pairwise ranking dataframe to a result table.
+    ## dataframe is assumed to have columns mean.diff and se.diff. In addition 
+    ## we have a column which gives rise to table columns, a column which gives 
+    ## rise to table rows and a column which specifies p-values.
+    all.cols <- unique(df[, tabcol])
+    all.rows <- unique(df[, rowcol])
+    strmatr <- matrix(ncol=length(all.cols), nrow=length(all.rows))
+    rownames(strmatr) <- all.rows
+    colnames(strmatr) <- all.cols
+    ## fill the matrix column wise
+    for (cv in all.cols){
+        ## extract a subframe
+        cdf <- df[df[,tabcol]==cv,]
+        ## apply rowcol as rownames
+        rownames(cdf) <- cdf[, rowcol]
+        ## and reorde to match all.rows
+        cdf <- cdf[all.rows,]
+        vstr <- v.format(cdf[, mncol], cdf[, secol])
+        pstr <- p.format(cdf[, pvals])
+        strmatr[, cv] <- col.format(vstr, pstr)
+    }
+    return(data.frame(strmatr, stringsAsFactors=FALSE))
+}
+
+paires2dfrm <- function(df, arrangeby,  mncol="mean.diff", secol="se.diff", mn2=NA, se2=NA, pvals="BY.adj", 
+                        v.format=function(mv, sv) sprintf("%1.2f \U00B1 %1.2f", mv, sv), 
+                        p.format=function(pvals) sprintf("%1.2e", pvals)){
+    ## converts a pairwise rank dataframe to a dataframe of strings
+    ## we extract only the arrangeby columns, convert mncol and secol to a string column "value" using
+    ## function v.format and convert column pvals to a string column "significance" using function
+    ## p.format. 
+    ## 
+    ## (C) P. Sykacek 2019 <peter@sykacek.net>
+    srtvals <- df[, arrangeby[1]]
+    for (colnams in arrangeby[2:length(arrangeby)])
+        srtvals <- cbind(srtvals, df[, colnams])
+    outframe <- df[, arrangeby]
+    ##print(dim(outframe))
+    out.ord <- order(srtvals)[1:nrow(df)]
+    ##print(length(out.ord))
+    outframe$value <- v.format(df[, mncol], df[, secol])
+    ##print(dim(outframe))
+    outframe$significance <- p.format(df[, pvals])
+    ##print(dim(outframe))
+    outframe$pvalue <- df[, pvals]
+    ## mod 02.01.2020 -> add raw data based contrast values
+    if (!is.na(mn2) && !is.na(se2)){
+        outframe$rawval <- v.format(df[, mn2], df[, se2])
+    }   
+    ##print(dim(outframe))
+    outframe <- outframe[out.ord,]
+    ##print(dim(outframe))
+    return(outframe)
+}
+
+##
+##
+##
+@ 
+
+\subsection{Significance of metric specific likelihood ratio tests}
+% kable_styling(latex_options = c("hold_position", "striped", "scale_down")) %>% 
+
+<<mtrlrtprep-chunk, eval=TRUE, echo=FALSE>>=
+## preapare a string datafarme for displaying the metric specific results. 
+raw.pval <- p2str(lrt.pvals$raw.pval) 
+BY.adj <- p2str(lrt.pvals$BY.adj) 
+metric <- lrt.pvals$metric 
+mtrc.lrt.tab <- data.frame(metric, raw.pval, BY.adj, stringsAsFactors=FALSE) 
+
+@ 
+\begin{center}
+\Sexpr{
+  kable(mtrc.lrt.tab, caption="Significance of dependency of univariate metric values on force field", format = "latex", booktabs = F) %>%
+  kable_styling(latex_options = c("hold_position", "striped", "scale_down")) %>% 
+  add_footnote(c("metric: name of analysed metric; raw.pval: raw p-vale assessing dependencies of metric values on force field for significance; BY.adj: Benjamini & Yekutieli adjusted raw p-values."))
+}
+\end{center}
+
+By analyzing the results table we conclude that except for the
+Pi\_Helix counts, Jvalue and NOE, all other metrics depend
+significantly on force field. The adjustment changes significance
+levels but does not change our assessment regarding significance.
+\subsection{Pairwise comparisons of force fields within metric}
+
+<<paircomp-chunk, eval=TRUE, echo=FALSE>>=
+
+## version 1 table uses p2str to represent p-values
+tabv1 <- pairtest2restab(pair.tests, p.format=p2str)
+write.table(tabv1, "pairwise_comp_v1.csv", sep="\t", fileEncoding = "utf8")
+## version 2 table uses sapply(pvals, pval2char) to represent p-values
+tabv2 <- pairtest2restab(pair.tests, p.format=function(pvals) sapply(pvals, pval2char))
+write.table(tabv2, "pairwise_comp_v2.csv", sep="\t", fileEncoding = "utf8")
+## version 3 table uses the default p-value conversion (only numeric)
+tabv3 <- pairtest2restab(pair.tests)
+write.table(tabv3, "pairwise_comp_v3.csv", sep="\t", fileEncoding = "utf8")
+## version 4 table uses only the mean without std. dev to represent contrast estimates
+## and a complete p-value coding
+tabv4 <- pairtest2restab(pair.tests,  v.format=function(mv, sv) sprintf("%1.2f", mv), p.format=p2str)
+write.table(tabv4, "pairwise_comp_v4.csv", sep="\t", fileEncoding = "utf8")
+## version 5 table uses only the mean without std. dev and sapply(pvals, pval2char) 
+## to represent p-values 
+tabv5 <- pairtest2restab(pair.tests,  v.format=function(mv, sv) sprintf("%1.2f", mv), 
+                         p.format=function(pvals) sapply(pvals, pval2char),
+                         col.format=function(vstr, pstr) sprintf("%5s %5s", vstr, pstr))
+write.table(tabv5, "pairwise_comp_v5.csv", sep="\t", fileEncoding = "utf8")
+## a long table as additional illustration
+long.tab <- paires2dfrm(pair.tests, arrangeby=c("contrast", "metric"), mn2="md.raw", se2="se.raw",
+                        p.format=function(pvals) sapply(pvals, pval2char))
+##paires2dfrm <- function(df, arrangeby,  mncol="mean.diff", secol="se.diff", mn2=NA, se2=NA, pvals="BY.adj", 
+long.dlttab <- paires2dfrm(pair.tests, arrangeby=c("contrast", "metric"), mncol="md.dlt", 
+                           secol="se.dlt", pvals="BY.dlt",
+                           p.format=function(pvals) sapply(pvals, pval2char))
+write.table(long.tab, "long_table_pairwise_contrasts.csv", sep="\t", fileEncoding = "utf8")
+write.table(long.dlttab, "long_table_pairwise_delta_contrasts.csv", sep="\t", fileEncoding = "utf8")
+##
+##
+##
+@ 
+
+The rows in the subsequent table denote certain binary contrasts. The
+table columns contain information about the expected value of the
+contrast and the standard error (a $95\%$ confidence interval).  The
+Benjamini \& Yekutieli adjusted significance levels assess whether the 
+respective metric (transformed values as illustrated in the box plots)
+
+%\begin{tiny}
+  %% the following makes the column header diagonal
+  %% we also use a table footnote
+% kable_styling(latex_options = c("hold_position", "striped", "scale_down")) %>%
+%  row_spec(0, angle = 65) %>% 
+\begin{center}
+\Sexpr{
+  kable(tabv5, caption = "Binary contrasts between force fields[note]", format = "latex", booktabs = T, align = "c") %>%
+  kable_styling(latex_options = c("hold_position", "striped", "scale_down")) %>%
+  row_spec(0, angle = 65) %>% 
+  add_footnote("Metrics are represented as expected value of the contrast \U00B1 standard error (95% confidence) and an indication of significance with (***) \U2192 p-value <0.001, (**) \U2192 p-value <0.01, (*) \U2192 p-value <0.05 and (.) \U2192 p-value <0.1. The p-values are adjusted for multiple testing using the Benjamini & Yekutieli FDR correction.")
+}
+\end{center}
+%\end{tiny}
+\clearpage %% push out fload tables
+\subsection{Pairwise assessments of simulation derived values}
+\bf{Table S3:} Pairwise differences of protein characteristics between
+force fields. Metrics are represented as expected value of the
+contrast $\pm$ standard error ($95\%$ confidence) and an indication of
+significance with (***) $\rightarrow$ p-value $< 0.001$, (**)
+$\rightarrow$ p-value $<0.01$, (*) $\rightarrow$ p-value $<0.05$ and
+(.)  $\rightarrow$ p-value $<0.1$. Combinations of contrasts between
+force fields and metrics which we find significant are highlighted in
+blue.
+\begin{center}
+\Sexpr{
+  long.tab %>%
+  mutate(
+  contrast=cell_spec(contrast,  "latex", color=ifelse(pvalue<0.05, "blue", "black")),
+  metric=cell_spec(metric, "latex", color=ifelse(pvalue<0.05, "blue", "black")),
+  value=cell_spec(value, "latex", color=ifelse(pvalue<0.05, "blue", "black")),
+  rawval=cell_spec(rawval, "latex", color=ifelse(pvalue<0.05, "blue", "black")),
+  significance=cell_spec(significance, "latex", color="black")
+  ) %>% 
+  select(contrast, metric, value, rawval, significance) %>% 
+  kable("latex", escape = F, linesep = "", caption = "Binary contrasts of protein characteristics", longtable = T, booktabs = T, align = "c") %>%
+  kable_styling(latex_options = c("hold_position", "striped")) 
+}
+\end{center}
+%%>% 
+%  add_footnote("Metrics are represented as expected value of the contrast \U00B1 standard error (95% confidence) and an indication of signifi%cance with (***) \U2192 p-value \textless 0.001, (**) \U2192 p-value <0.01, (*) \U2192 p-value <0.05 and (.) \U2192 p-value <0.1. Combination%s of contrasts between force fields and metrics which we find significant are highlighted in blue.")
+\subsection{Pairwise assessments of simulation derived differences from crystal structure derived truth}
+
+\bf{Table S4:} Pairwise assessments of the discrepancies of simulation
+derived and experimentally validated protein characteristics.
+Differences between simulation derived and structure based protein
+characteristics are represented as expected value of the contrast
+$\pm$ standard error ($95\%$ confidence) and an indication of
+significance with (***) $\rightarrow$ p-value $< 0.001$, (**)
+$\rightarrow$ p-value $<0.01$, (*) $\rightarrow$ p-value $<0.05$ and
+(.)  $\rightarrow$ p-value $<0.1$. Combinations of contrasts between
+force fields and metrics which we find significant are highlighted in
+blue. To put these results into relation with table S1, we note that
+the results reported in table S2 will in general differ in p-vale and
+sign and absolute value of the expected contrast value from those in
+table S1. The exact same result will however be observed if the
+crystal derived ``truth'' is {\it smaller} than the simulation derived
+characteristics obtained with both force fields considered. The same
+p-value and an expected contrast with identical absolute value and
+alternating sign will be observed if the crystal derived ``truth'' is
+{\it larger} than the simulation derived characteristics obtained with
+both force fields considered.
+
+A positive sign of the expected contrast value indicates that
+the force field which enters the contrast positively is closer to the
+crystal structure derived value. The alternating signs we observe in
+dependence of metric for a particular pair of force fields indicate
+that preference depends on the metrics considered. Unequivocal
+preferences for a particular force field can thus in general not be
+stated from these analyses. 
+
+\begin{center}
+\Sexpr{
+  long.dlttab %>%
+  mutate(
+  contrast=cell_spec(contrast,  "latex", color=ifelse(pvalue<0.05, "blue", "black")),
+  metric=cell_spec(metric, "latex", color=ifelse(pvalue<0.05, "blue", "black")),
+  value=cell_spec(value, "latex", color=ifelse(pvalue<0.05, "blue", "black")),
+  significance=cell_spec(significance, "latex", color="black")
+  ) %>% 
+  select(contrast, metric, value, significance) %>% 
+  kable("latex", escape = F, linesep = "", caption = "Binary contrasts of protein characteristic differences in simulation and measurement", longtable = T, booktabs = T, align = "c") %>%
+  kable_styling(latex_options = c("hold_position", "striped")) 
+}
+\end{center}
+%%>% 
+%  add_footnote("Differences between simulation derived and structure based protein characteristics are represented as expected value of the c%ontrast \U00B1 standard error (95% confidence) and an indication of significance with (***) \U2192 p-value \textless 0.001, (**) \U2192 p-val%ue <0.01, (*) \U2192 p-value <0.05 and (.) \U2192 p-value <0.1. Combinations of contrasts between force fields and metrics which we find sign%ificant are highlighted in blue. A positive sign of the expected contrast value indicates that the force field which enters the contrast posi%tively is closer to the crystal structure derived value. The alternating signs we observe in dependence of metric for a particular pair of fo%rce fields indicate that preference depends on the metrics considered. Unequivocal preferences for a particular force field can not be stated% from our analyses.")
+
+%% \section{Discussion}
+%% The results displayed above allow the conclusion that the reported
+%% significance assessments of metric dependencies on force field are
+%% difficult if we want to analyse fine grained improvements (e.g. force
+%% fields 54A7 and 54A8). A larger number of simulated proteins is thus
+%% imperative to assess subtle differences of force fields which have
+%% similar effects. The requirement of larger sample size is illustrated
+%% from the observation that J-coupling-constants, NOE but also Pi\_Helix
+%% counts show no significant differences in pairwise comparisons.  The
+%% relatively smaller number of samples which allow for calculating
+%% J-coupling-constants and NOE renders assessments of the more subtle
+%% differences between other force fields difficult. The analysis
+%% presented in this supplement suggests thus that large simulation
+%% experiments are required to investigate subtle differences. Observing
+%% that for any paricular pair of force fields assessed in Table S4 the
+%% sign of the expected contrast value differs suggests furthermore that
+%% a unequivocal preference of a particular force filed accross all
+%% protein characteristics can not be stated. Assessments which allow for
+%% preference statements among force fields depend on the availability of
+%% rich simulation studies on larger numbers of compounds.
+
+%%\bibliography{/home/psykacek/bibdir/peterdos.bib} 
+%%\bibliographystyle{apalike}
+
+\begin{thebibliography}{}
+
+\bibitem[Bates et~al., 2015]{Bates+etal:2015}
+Bates, D., M{\"a}chler, M., Bolker, B., and Walker, S. (2015).
+\newblock Fitting linear mixed-effects models using {lme4}.
+\newblock {\em Journal of Statistical Software}, 67(1):1--48.
+
+\bibitem[Benjamini and Yekutieli, 2001]{Benjamini+Yekutieli:2001}
+Benjamini, Y. and Yekutieli, D. (2001).
+\newblock The control of the false discovery rate in multiple testing under
+  dependency.
+\newblock {\em Ann. Statist.}, 29(4):1165--1188.
+
+\bibitem[Box and Cox, 1964]{Box+Cox:1964}
+Box, G.~E.~P. and Cox, D.~R. (1964).
+\newblock An analysis of transformations.
+\newblock {\em Journal of the Royal Statistical Society. Series B},
+  26(2):211--252.
+
+\bibitem[Carugo and Pongor, 2001]{Carugo+Pongor:2001}
+Carugo, O. and Pongor, S. (2001).
+\newblock {{A} normalized root-mean-square distance for comparing protein
+  three-dimensional structures}.
+\newblock {\em Protein Sci.}, 10(7):1470--1473.
+
+\bibitem[Fox and Weisberg, 2019]{Fox+Weisberg:2019}
+Fox, J. and Weisberg, S. (2019).
+\newblock {\em An {R} Companion to Applied Regression}.
+\newblock Sage, Thousand Oaks {CA}, third edition.
+
+\bibitem[Lenth et~al., 2019]{Lenth+etal:2019}
+Lenth, R., Singmann, H., Love, J., Buerkner, P., and Herve, M. (2019).
+\newblock Estimated marginal means, aka least-squares means.
+\newblock Technical report, The University of Iowa.
+\newblock URL [https://CRAN.R-project.org/package=emmeans].
+
+\bibitem[Mood et~al., 1984]{Mood+etal:1984}
+Mood, A., Franklin, F.~A., and Boes, D.~C. (1984).
+\newblock {\em Introduction to the theory of statistics}.
+\newblock McGraw-Hill, Auckland, 3 edition.
+
+\bibitem[Pinheiro and Bates, 2000]{Pinheiro+Bates:2000}
+Pinheiro, J.~C. and Bates, D.~M. (2000).
+\newblock {\em Mixed-Effects Models in S and S-PLUS}.
+\newblock Springer, New York.
+
+\bibitem[Snijders and Boskers, 2012]{Snijders+Bosker:2012}
+Snijders, T.~A.~B. and Boskers, R.~J. (2012).
+\newblock {\em Multilevel Analysis: An Introduction to Basic and Advanced
+  Multilevel Modeling}.
+\newblock Sage Publishers.
+
+\bibitem[Villa et~al., 2007]{Villa+etal:2007}
+Villa, A., Fan, H., Wassenaar, T., and Mark, A.~E. (2007).
+\newblock {{H}ow sensitive are nanosecond molecular dynamics simulations of
+  proteins to changes in the force field?}
+\newblock {\em J Phys Chem B}, 111(21):6015--6025.
+
+\bibitem[Xie, 2014]{Xie:2014}
+Xie, Y. (2014).
+\newblock knitr: A comprehensive tool for reproducible research in {R}.
+\newblock In Stodden, V., Leisch, F., and Peng, R.~D., editors, {\em
+  Implementing Reproducible Computational Research}. Chapman and Hall/CRC.
+\newblock ISBN 978-1466561595.
+
+\bibitem[Xie, 2015]{Xie:2015}
+Xie, Y. (2015).
+\newblock {\em Dynamic Documents with {R} and knitr}.
+\newblock Chapman and Hall/CRC, Boca Raton, Florida, 2nd edition.
+\newblock ISBN 978-1498716963.
+
+\end{thebibliography}
+
+
+\end{document}
+
+\section{Generating a table similar to table 3 in the paper}
+<<tab3paper-chunk, eval=TRUE, echo=FALSE>>=
+## properties
+quant4table <- c(    
+    "Hbond_bb_0.25_120", "SASA_polar", "SASA_nonpolar", "Rgyr", "A_Helix", 
+    "B_Strand", "ThreeTen_Helix", "Jvalue", "NOE_repl_merged",  "RMSD.ADJ"
+)
+## force fields
+ff4table <- c("54A7", "54A8", "45A4", "53A6")
+
+## reduce to the above properties and force filds.
+rowsel <- (univ.analyse.data$quant.fact %in% quant4table) &
+    (univ.analyse.data$all.alg %in% ff4table)
+reduced.data <- univ.analyse.data[rowsel,]
+
+all.p <- c()
+all.qf <- c()
+## store for pairwise comparisons
+all.pairs <- c()  
+## metrics
+all.metrics <- c()
+## p-values for pairwise comparisons within metrics
+all.pmp <- c()
+## the expected mean differences of the pairwise comparisons
+all.emd <- c()
+## and teh associated standard error
+all.se <- c()
+## the for loop selects individual metrics from the univariate
+## dataframe.
+for (q.f in unique(reduced.data$quant.fact)){
+    rw.sel <- reduced.data$quant.fact==q.f
+    fit.n <- lmer(all.y~(1|all.comp), data=reduced.data[rw.sel,])
+    ## summary(fit.n)
+    ## the alternative model uses in addition all.alg (force field) as fixed effect.
+    fit.a <- lmer(all.y~all.alg+(1|all.comp), data= reduced.data[rw.sel,])
+    ## summary(fit.a)
+    ## we can finally use anova to analyse for significant differences.
+    ## aka a significant dependency of metrics from .
+    suppressMessages(res <- anova(fit.n, fit.a))
+    all.p <- c(all.p, res[["Pr(>Chisq)"]][2])
+    all.qf <- c(all.qf, q.f)
+    ## next step: analysis of pairwise comparisons we do not adjust 
+    ## as we do that for all pairwise comparisons together.
+    suppressMessages(res <- emmeans(fit.a, list(pairwise ~ all.alg), adjust = "none"))
+    ## convert the emmeans result to a dataframe
+    pdtab <- as.data.frame(res$"pairwise differences of all.alg", stringsAsFactors=FALSE)
+    ## store all results 
+    all.pairs <- c(all.pairs, pdtab[,1])
+    all.metrics <- c(all.metrics, rep(q.f, nrow(pdtab)))
+    all.pmp <- c(all.pmp, pdtab$p.value)
+    all.emd <- c(all.emd, pdtab$estimate)
+    all.se <- c(all.se, pdtab$SE)
+}
+##cat("Properties     :", all.qf, "\n")
+##cat("Raw p-values   :", all.p, "\n")
+##cat("BH adjusted    :", p.adjust(all.p, method="BH"), "\n")
+##cat("BY adjusted    :", p.adjust(all.p, method="BY"), "\n")
+##cat("Bonferoni adj. :", p.adjust(all.p, method="BY"), "\n")
+
+## generate two dataframes
+## 1) for assessing the effect of force field on individual metrics:
+raw.pval <- all.p
+BY.adj <- p.adjust(all.p, method="BY")
+metric <- all.qf
+lrt.pvals <- data.frame(metric, raw.pval, BY.adj, stringsAsFactors=FALSE)
+## 2) for the pairwise assessments
+raw.pval <- all.pmp
+BY.adj <- p.adjust(all.pmp, method="BY")
+## -all.emd for compatibility with the contrasts in the paper.
+mean.diff <- -all.emd
+se.diff <- all.se
+metric <- all.metrics
+contrast <- all.pairs
+## -mean.diff because the contrasts are negated in the paper.
+tab4.tests <- data.frame(metric, contrast, mean.diff, se.diff, raw.pval, BY.adj, stringsAsFactors=FALSE)
+
+paper.tab3 <- pairtest2restab(tab4.tests)
+paper.tab3 <- as.data.frame(t(as.matrix(paper.tab3)), stringsAsFactors=FALSE)
+## change column order to match paper.
+colord <- c("54A7 - 54A8", "53A6 - 54A8", "45A4 - 54A8", "53A6 - 54A7", "45A4 - 54A7", "45A4 - 53A6")
+paper.tab3 <- paper.tab3[, colord]
+## we change the names of the cointrast to match the names in the paper and the sign change.
+contrastnams<- c("54A8 - 54A7", "54A8 - 53A6", "54A8 - 45A4", "54A7 - 53A6", "54A7 - 45A4", "53A6 - 45A4")
+colnames(paper.tab3) <- contrastnams
+write.table(paper.tab3, "paper_tab3.csv", sep="\t", fileEncoding = "utf8")
+##
+##
+##
+@ 
+
+\begin{center}
+\Sexpr{
+  kable(paper.tab3, caption = "Selected binary contrasts between force fields[note]", format = "latex", booktabs = T, align = "c") %>%
+  kable_styling(latex_options = c("hold_position", "striped", "scale_down")) %>%
+  row_spec(0, angle = 0) %>% 
+  add_footnote(sprintf("Metrics are represented as expected value of the contrast \U00B1 standard error (95%% confidence interval) and a Benjamini & Yekutieli adjusted p-value (the adjustment is for all %1.0d pairwise contrasts including force fied H66) to quantify the significance that the contrast deviates from zero.", nrow(tabv5)*ncol(tabv5)))
+}
+\end{center}

@@ -1,0 +1,70 @@
+
+R version 4.1.2 (2021-11-01) -- "Bird Hippie"
+Copyright (C) 2021 The R Foundation for Statistical Computing
+Platform: x86_64-pc-linux-gnu (64-bit)
+
+R is free software and comes with ABSOLUTELY NO WARRANTY.
+You are welcome to redistribute it under certain conditions.
+Type 'license()' or 'licence()' for distribution details.
+
+  Natural language support but running in an English locale
+
+R is a collaborative project with many contributors.
+Type 'contributors()' for more information and
+'citation()' on how to cite R or R packages in publications.
+
+Type 'demo()' for some demos, 'help()' for on-line help, or
+'help.start()' for an HTML browser interface to help.
+Type 'q()' to quit R.
+
+> library(knitr)
+> knit("ff_validation.Rnw")
+
+
+processing file: ff_validation.Rnw
+1/39                       
+2/39 [setup]               
+3/39                       
+4/39 [compile-demo]        
+5/39                       
+6/39 [c1-chunk]            
+7/39                       
+8/39 [c2-chunk]            
+9/39                       
+10/39 [c3-chunk]            
+11/39                       
+12/39 [c4-chunk]            
+13/39                       
+14/39 [c5-chunk]            
+15/39                       
+16/39 [c6-chunk]            
+17/39                       
+18/39 [c7-chunk]            
+19/39                       
+20/39 [c8-chunk]            
+21/39                       
+22/39 [c9-chunk]            
+23/39                       
+24/39 [initialisation-chunk]
+25/39                       
+26/39 [smry-chunk]          
+27/39                       
+28/39 [bp-chunk]            
+29/39                       
+30/39 [manova-chunk]        
+31/39                       
+32/39 [bincomp-chunk]       
+33/39                       
+34/39 [mtrlrtprep-chunk]    
+35/39                       
+36/39 [paircomp-chunk]      
+37/39                       
+38/39 [tab3paper-chunk]     
+39/39                       
+output file: ff_validation.tex
+
+[1] "ff_validation.tex"
+> 
+> proc.time()
+     user    system   elapsed 
+10438.939  7042.829  2792.570 
