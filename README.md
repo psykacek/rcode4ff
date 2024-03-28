@@ -1,4 +1,4 @@
-# Algorithmic supplement to "Challenges associated with the validation of protein force fields based on structural criteria"
+# Algorithmic supplement to "On the Validation of Protein Force Fields Based on Structural Criteria"
 
 M Stroet, M Setz, T Lee, A Malde, G van den Bergen, P Sykacek, C Oostenbrink and A E Mark
 
